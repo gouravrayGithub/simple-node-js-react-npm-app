@@ -25,7 +25,6 @@ pipeline {
     stage('Build') {
       steps {
         withEnv(["PATH+HOMEBREW=/opt/homebrew/bin"]) {
-          // prefer ci for reproducible installs
           sh 'npm ci || npm install'
         }
       }
@@ -34,7 +33,6 @@ pipeline {
     stage('Test') {
       steps {
         withEnv(["PATH+HOMEBREW=/opt/homebrew/bin"]) {
-          // ensure executable bit (safe even if already executable)
           sh 'chmod +x jenkins/scripts/test.sh || true'
           sh './jenkins/scripts/test.sh'
         }
@@ -43,8 +41,28 @@ pipeline {
 
     stage('Archive') {
       steps {
-        // archive React build if present; allows empty archive so job doesn't fail
         archiveArtifacts artifacts: 'build/**', allowEmptyArchive: true, fingerprint: true
+      }
+    }
+
+    stage('Deliver') {
+      steps {
+        // ensure PATH and exec permission for deploy/kill scripts
+        withEnv(["PATH+HOMEBREW=/opt/homebrew/bin"]) {
+          sh 'chmod +x jenkins/scripts/deliver.sh || true'
+          sh 'chmod +x jenkins/scripts/kill.sh || true'
+
+          // run deliver script (should be idempotent and log its actions)
+          sh './jenkins/scripts/deliver.sh'
+
+          // wait for manual confirmation but don't block forever
+          timeout(time: 30, unit: 'MINUTES') {
+            input message: 'Finished using the web site? Click "Proceed" to continue or "Abort" to stop deployment.'
+          }
+
+          // after approval, run kill (or pm2 stop/restart)
+          sh './jenkins/scripts/kill.sh'
+        }
       }
     }
   }
